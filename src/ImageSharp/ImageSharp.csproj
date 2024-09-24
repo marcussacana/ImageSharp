@@ -19,6 +19,7 @@
     <Platforms>AnyCPU;x64</Platforms>
   </PropertyGroup>
 
+  <!--  This enables the nullable analysis and treats all nullable warnings as error-->
   <PropertyGroup>
     <!--Bump to V3 prior to tagged release.-->
     <MinVerMinimumMajorMinor>3.0</MinVerMinimumMajorMinor>
@@ -46,9 +47,15 @@
   <ItemGroup>
     <None Include="..\..\LICENSE" Pack="true" PackagePath="" />
     <None Include="..\..\shared-infrastructure\branding\icons\imagesharp\sixlabors.imagesharp.128.png" Pack="true" PackagePath="" />
+    <None Include="..\..\SixLabors.ImageSharp.props" Pack="true" PackagePath="build" />
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Update="Formats\_Generated\ImageMetadataExtensions.cs">
+      <DesignTime>True</DesignTime>
+      <AutoGen>True</AutoGen>
+      <DependentUpon>ImageMetadataExtensions.tt</DependentUpon>
+    </Compile>
     <Compile Update="Formats\Jpeg\Components\Block8x8F.Generated.cs">
       <DesignTime>True</DesignTime>
       <AutoGen>True</AutoGen>
@@ -139,7 +146,7 @@
       <AutoGen>True</AutoGen>
       <DependentUpon>PorterDuffFunctions.Generated.tt</DependentUpon>
     </Compile>
-    <Compile Update="Formats\ImageExtensions.Save.cs">
+    <Compile Update="Formats\_Generated\ImageExtensions.Save.cs">
       <AutoGen>True</AutoGen>
       <DesignTime>True</DesignTime>
       <DependentUpon>ImageExtensions.Save.tt</DependentUpon>
@@ -147,6 +154,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <None Update="Formats\_Generated\ImageMetadataExtensions.tt">
+      <LastGenOutput>ImageMetadataExtensions.cs</LastGenOutput>
+      <Generator>TextTemplatingFileGenerator</Generator>
+    </None>
     <None Update="Formats\Jpeg\Components\Block8x8F.Generated.tt">
       <Generator>TextTemplatingFileGenerator</Generator>
       <LastGenOutput>Block8x8F.Generated.cs</LastGenOutput>
@@ -219,7 +230,7 @@
       <LastGenOutput>DefaultPixelBlenders.Generated.cs</LastGenOutput>
       <Generator>TextTemplatingFileGenerator</Generator>
     </None>
-    <None Update="Formats\ImageExtensions.Save.tt">
+    <None Update="Formats\_Generated\ImageExtensions.Save.tt">
       <Generator>TextTemplatingFileGenerator</Generator>
       <LastGenOutput>ImageExtensions.Save.cs</LastGenOutput>
     </None>

@@ -34,7 +34,16 @@ namespace SixLabors.ImageSharp
 
         public static unsafe void MemoryCopy(byte* source, byte* destination, long destinationSizeInBytes, long sourceBytesToCopy)
         {
-            for (int i = 0; i < sourceBytesToCopy && i < destinationSizeInBytes; i++)
+            long i = 0;
+            long qwMax = sourceBytesToCopy / 8;
+            long dstMax = destinationSizeInBytes - 8;
+
+            for (int x = 0; i < qwMax && i < dstMax; i += 8, x++)
+            {
+                ((long*)destination)[x] = ((long*)source)[x];
+            }
+
+            for (; i < sourceBytesToCopy && i < destinationSizeInBytes; i++)
             {
                 destination[i] = source[i];
             }

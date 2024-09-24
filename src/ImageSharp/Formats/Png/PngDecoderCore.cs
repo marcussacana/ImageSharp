@@ -578,7 +578,7 @@ namespace SixLabors.ImageSharp.Formats.Png
             }
             else
             {
-                this.DecodePixelData(dataStream, image, pngMetadata);
+                this.DecodePixelData(dataStream, image, pngMetadata, CancellationToken.None);
             }
         }
 
@@ -587,58 +587,81 @@ namespace SixLabors.ImageSharp.Formats.Png
         /// </summary>
         /// <typeparam name="TPixel">The pixel format.</typeparam>
         /// <param name="compressedStream">The compressed pixel data stream.</param>
-        /// <param name="image">The image to decode to.</param>
+        /// <param name="imageFrame">The image frame to decode to.</param>
         /// <param name="pngMetadata">The png metadata</param>
-        private void DecodePixelData<TPixel>(DeflateStream compressedStream, ImageFrame<TPixel> image, PngMetadata pngMetadata)
+        /// <param name="cancellationToken">The CancellationToken</param>
+        private void DecodePixelData<TPixel>(
+            DeflateStream compressedStream,
+            ImageFrame<TPixel> imageFrame,
+            PngMetadata pngMetadata,
+            CancellationToken cancellationToken)
             where TPixel : unmanaged, IPixel<TPixel>
         {
-            while (this.currentRow < this.header.Height)
+            int currentRow = 0;
+            int currentRowBytesRead = 0;
+            int height = header.Height;
+
+            IMemoryOwner<TPixel>? blendMemory = null;
+            Span<TPixel> blendRowBuffer = [];
+
+            while (currentRow < height)
             {
-                Span<byte> scanlineSpan = this.scanline.GetSpan();
-                while (this.currentRowBytesRead < this.bytesPerScanline)
+                cancellationToken.ThrowIfCancellationRequested();
+                int bytesPerFrameScanline = this.CalculateScanlineLength(header.Width) + 1;
+                Span<byte> scanSpan = this.scanline.GetSpan().Slice(0, bytesPerFrameScanline);
+                Span<byte> prevSpan = this.previousScanline.GetSpan().Slice(0, bytesPerFrameScanline);
+
+                while (currentRowBytesRead < bytesPerFrameScanline)
                 {
-                    int bytesRead = compressedStream.Read(scanlineSpan, this.currentRowBytesRead, this.bytesPerScanline - this.currentRowBytesRead);
+                    int bytesRead = compressedStream.Read(scanSpan, currentRowBytesRead, bytesPerFrameScanline - currentRowBytesRead);
                     if (bytesRead <= 0)
                     {
                         return;
                     }
 
-                    this.currentRowBytesRead += bytesRead;
+                    currentRowBytesRead += bytesRead;
                 }
 
-                this.currentRowBytesRead = 0;
+                currentRowBytesRead = 0;
 
-                switch ((FilterType)scanlineSpan[0])
+                switch ((FilterType)scanSpan[0])
                 {
                     case FilterType.None:
                         break;
 
                     case FilterType.Sub:
-                        SubFilter.Decode(scanlineSpan, this.bytesPerPixel);
+                        SubFilter.Decode(scanSpan, this.bytesPerPixel);
                         break;
 
                     case FilterType.Up:
-                        UpFilter.Decode(scanlineSpan, this.previousScanline.GetSpan());
+                        UpFilter.Decode(scanSpan, prevSpan);
                         break;
 
                     case FilterType.Average:
-                        AverageFilter.Decode(scanlineSpan, this.previousScanline.GetSpan(), this.bytesPerPixel);
+                        AverageFilter.Decode(scanSpan, prevSpan, this.bytesPerPixel);
                         break;
 
                     case FilterType.Paeth:
-                        PaethFilter.Decode(scanlineSpan, this.previousScanline.GetSpan(), this.bytesPerPixel);
+                        PaethFilter.Decode(scanSpan, prevSpan, this.bytesPerPixel);
                         break;
 
                     default:
+                        //if (this.segmentIntegrityHandling is SegmentIntegrityHandling.IgnoreData or SegmentIntegrityHandling.IgnoreAll)
+                        //{
+                        //    goto EXIT;
+                        //}
+                       
                         PngThrowHelper.ThrowUnknownFilter();
                         break;
                 }
 
-                this.ProcessDefilteredScanline(scanlineSpan, image, pngMetadata);
-
+                this.ProcessDefilteredScanline(currentRow, scanSpan, imageFrame, pngMetadata, blendRowBuffer);
                 this.SwapScanlineBuffers();
-                this.currentRow++;
+                currentRow++;
             }
+
+            EXIT:
+            blendMemory?.Dispose();
         }
 
         /// <summary>
@@ -740,21 +763,32 @@ namespace SixLabors.ImageSharp.Formats.Png
         /// Processes the de-filtered scanline filling the image pixel data
         /// </summary>
         /// <typeparam name="TPixel">The pixel format.</typeparam>
-        /// <param name="defilteredScanline">The de-filtered scanline</param>
+        /// <param name="frameControl">The frame control</param>
+        /// <param name="currentRow">The index of the current scanline being processed.</param>
+        /// <param name="scanline">The de-filtered scanline</param>
         /// <param name="pixels">The image</param>
         /// <param name="pngMetadata">The png metadata.</param>
-        private void ProcessDefilteredScanline<TPixel>(ReadOnlySpan<byte> defilteredScanline, ImageFrame<TPixel> pixels, PngMetadata pngMetadata)
+        /// <param name="blendRowBuffer">A span used to temporarily hold the decoded row pixel data for alpha blending.</param>
+        private void ProcessDefilteredScanline<TPixel>(
+            int currentRow,
+            ReadOnlySpan<byte> scanline,
+            ImageFrame<TPixel> pixels,
+            PngMetadata pngMetadata,
+            Span<TPixel> blendRowBuffer)
             where TPixel : unmanaged, IPixel<TPixel>
         {
-            Span<TPixel> rowSpan = pixels.PixelBuffer.DangerousGetRowSpan(this.currentRow);
+            Span<TPixel> destination = pixels.PixelBuffer.DangerousGetRowSpan(currentRow);
+
+            Span<TPixel> rowSpan = destination;
 
             // Trim the first marker byte from the buffer
-            ReadOnlySpan<byte> trimmed = defilteredScanline.Slice(1, defilteredScanline.Length - 1);
+            ReadOnlySpan<byte> trimmed = scanline.Slice(1);
 
             // Convert 1, 2, and 4 bit pixel data into the 8 bit equivalent.
-            IMemoryOwner<byte> buffer = null;
+            IMemoryOwner<byte>? buffer = null;
             try
             {
+                // TODO: The allocation here could be per frame, not per scanline.
                 ReadOnlySpan<byte> scanlineSpan = this.TryScaleUpTo8BitArray(
                     trimmed,
                     this.bytesPerScanline - 1,

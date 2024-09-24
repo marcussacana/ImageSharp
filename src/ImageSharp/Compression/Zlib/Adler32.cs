@@ -297,16 +297,15 @@ namespace SixLabors.ImageSharp.Compression.Zlib
         {
             uint s1 = adler & 0xFFFF;
             uint s2 = (adler >> 16) & 0xFFFF;
-            uint k;
 
             fixed (byte* bufferPtr = buffer)
             {
-                var localBufferPtr = bufferPtr;
+                byte* localBufferPtr = bufferPtr;
                 uint length = (uint)buffer.Length;
 
                 while (length > 0)
                 {
-                    k = length < NMAX ? length : NMAX;
+                    uint k = length < NMAX ? length : NMAX;
                     length -= k;
 
                     while (k >= 16)
